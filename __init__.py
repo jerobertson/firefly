@@ -61,7 +61,7 @@ def get_current_schedule(room, weekday, current_timestamp):
 
     for time in pyscript.app_config["rooms"][room][weekday]:
         h, m = time.split(":")
-        if get_timestamp(h, m) < current_timestamp:
+        if get_timestamp(h, m) <= current_timestamp:
             current_schedule = time
 
     return current_schedule
@@ -98,13 +98,13 @@ def trigger_factory(room):
     }
 
     for day in [day for day in pyscript.app_config["rooms"][room]]:
-        if day == "default": # fill empty days
+        if day == "default":
             for weekday in [weekday for weekday in weekdays if not weekdays[weekday]]:
                 weekdays[weekday] = create_triggers(room, day, weekday)
-        elif day == "weekend": # fill sat + sun if empty
+        elif day == "weekend":
             for weekday in [weekday for weekday in weekdays if weekday in ["saturday", "sunday"]]:
                 weekdays[weekday] = create_triggers(room, day, weekday)
-        elif day in weekdays.keys(): # fill in day
+        elif day in weekdays.keys():
             weekdays[weekday] = create_triggers(room, day, day)
 
     return weekdays
@@ -114,18 +114,20 @@ def create_triggers(room, day, weekday):
     time_triggers = []
 
     for time in [time for time in pyscript.app_config["rooms"][room][day]]:
-        temp = pyscript.app_config["rooms"][room][day][time]
-        log.debug(f"Firefly is creating a trigger in {room} for {weekday} at {time} and temp {temp}")
+        log.debug(f"Firefly is creating a trigger in {room} for {weekday} at {time}") 
 
         @time_trigger(get_cron(weekday, time))
         def heat_change():
             enabled_locks = [lock for lock in pyscript.app_config["locks"] if state.get(lock) not in ["off", "unavailable"]]
-            if enabled_locks or not is_home():
+            enablers = [enabler for enabler in pyscript.app_config["enablers"] if state.get(enabler) not in ["off", "unavailable"]]
+            temp = get_temp_target(room)
+
+            if enabled_locks or not is_home() or not enablers:
                 log.info(f"Firefly won't change the heating; locks: {enabled_locks} | Is home: {is_home}.")
-                log.debug(f"{room} {weekday} {time} {temp}.")
+                log.debug(f"{room} {temp}.")
                 return
                     
-            log.info(f"Firefly is updating the heating: {room} {weekday} {time} {temp}.")
+            log.info(f"Firefly is updating the heating: {room} {temp}.")
             service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=temp)
 
         time_triggers.append(heat_change)
@@ -133,55 +135,62 @@ def create_triggers(room, day, weekday):
     return time_triggers
 
 
-@service
 def reset_heating(room):
     temp = get_temp_target(room)
+    current = state.getattr(f"climate.{room}")["temperature"]
 
-    log.info(f"Firefly is resetting the heating in {room} to {temp}.")
-
-    service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=temp)
-
-
-def get_locks_condition():
-    return " in ['off', 'unavailable'] and ".join(pyscript.app_config["locks"]) + " in ['off', 'unavailable']" if pyscript.app_config["locks"] else "1 == 2"
-
-
-def get_preheat_condition():
-    return f"{pyscript.app_config['preheat']} == 'on'"
+    if temp == current:
+        log.info(f"Firefly will keep the heating in {room} the same.")
+    else:
+        log.info(f"Firefly is resetting the heating in {room} to {temp}.")
+        service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=temp)
 
 
-def get_person_home_condition():
-    return " == 'home' or ".join(pyscript.app_config["tracking"]) + " == 'home'"
-    
+@service
+def firefly_reset_all_heating(enabler):
+    for room in pyscript.app_config["rooms"]:
+        reset_heating(room)
 
-@state_trigger(get_locks_condition())
-def tpp_reset_heating_unlocked(room = None):
-    if not is_home():
-        return
-    
-    reset_heating(room) if room else [reset_heating(r) for r in pyscript.app_config["rooms"]]
+    service.call("input_boolean", "turn_on", entity_id=enabler)
 
 
-@state_trigger(get_preheat_condition())
-def tpp_reset_heating_preheat(room = None):
-    if [lock for lock in pyscript.app_config["locks"] if state.get(lock) not in ["off", "unavailable"]]:
-        return
+def get_state_change_condition():
+    enablers = " or ".join(pyscript.app_config["enablers"])
+    locks = " or ".join(pyscript.app_config["locks"])
+    tracking = " or ".join(pyscript.app_config["tracking"])
+    preheat = pyscript.app_config["preheat"]
 
-    if [person for person in pyscript.app_config["tracking"] if state.get(person) == "home"]:
-        service.call("input_boolean", "turn_off", entity_id=pyscript.app_config['preheat'])
-        return
-
-    reset_heating(room) if room else [reset_heating(r) for r in pyscript.app_config["rooms"]]
+    return f"{enablers} or {locks} or {tracking} or {preheat}"
 
 
-@state_trigger(get_person_home_condition())
-def person_home(room = None):
-    if [lock for lock in pyscript.app_config["locks"] if state.get(lock) not in ["off", "unavailable"]]:
-        return
+@state_trigger(get_state_change_condition())
+def state_handler(trigger_type=None, var_name=None, value=None, old_value=None):
+    home_count = len([person for person in pyscript.app_config["tracking"] if state.get(person) == "home"])
 
-    if len([person for person in pyscript.app_config["tracking"] if state.get(person) == "home"]) != 1:
-        return
+    if var_name in pyscript.app_config["tracking"] and old_value == "home" and home_count == 0:
+        log.info("Firefly is setting the heating mode to 'away'.")
 
-    service.call("input_boolean", "turn_off", entity_id=pyscript.app_config['preheat'])
+        for room in pyscript.app_config["rooms"]:
+            service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="away")
 
-    reset_heating(room) if room else [reset_heating(r) for r in pyscript.app_config["rooms"]]
+    elif (var_name in pyscript.app_config["tracking"] and old_value != "home" and home_count == 1) or var_name == pyscript.app_config["preheat"] and value not in ["off", "unavailable"]:
+        log.debug("Firefly is setting the heating mode to 'home'.")
+
+        for room in pyscript.app_config["rooms"]:
+            service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="home")
+
+    elif var_name not in pyscript.app_config["tracking"] and var_name != pyscript.app_config["preheat"]:
+
+        if not [enabler for enabler in pyscript.app_config["enablers"] if state.get(enabler) not in ["off", "unavailable"]]:
+            log.info("Firefly can't see any enablers. Turning heating off.")
+            for room in pyscript.app_config["rooms"]:
+                service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=14)
+
+        elif [lock for lock in pyscript.app_config["locks"] if state.get(lock) not in ["off", "unavailable"]]:
+            log.info("Firefly is locked.")
+            return
+
+        else:
+            log.info("Firefly is enabled and unlocked - resetting all rooms.")
+            for room in pyscript.app_config["rooms"]:
+                reset_heating(room)
