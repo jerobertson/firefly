@@ -164,7 +164,7 @@ def get_state_change_condition():
 def state_handler(trigger_type=None, var_name=None, value=None, old_value=None):
     home_count = len([person for person in pyscript.app_config["tracking"] if state.get(person) == "home"])
 
-    if var_name in pyscript.app_config["tracking"] and old_value == "home" and home_count == 0:
+    if var_name in pyscript.app_config["tracking"] and old_value == "home" and home_count == 0 and state.get(pyscript.app_config["preheat"]) in ["off", "unavailable"]:
         log.info("Firefly is setting the heating mode to 'away'.")
 
         for room in pyscript.app_config["rooms"]:
@@ -176,14 +176,18 @@ def state_handler(trigger_type=None, var_name=None, value=None, old_value=None):
         for room in pyscript.app_config["rooms"]:
             service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="home")
 
+        if state.get(pyscript.app_config["preheat"]) not in ["off", "unavailable"] and home_count > 0:
+            log.debug("Firefly is turning preheat off, as someone is home.")
+            service.call("input_boolean", "turn_off", entity_id=pyscript.app_config["preheat"])
+
     elif var_name not in pyscript.app_config["tracking"] and var_name != pyscript.app_config["preheat"]:
 
-        if state.get(enabler) in ["off", "unavailable"]:
-            log.info("Firefly can't see any enablers. Turning heating off.")
+        if state.get(pyscript.app_config["enabler"]) in ["off", "unavailable"]:
+            log.info("Firefly has been disabled - turning heating off.")
             for room in pyscript.app_config["rooms"]:
                 service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=14)
 
         else:
-            log.info("Firefly is enabled and unlocked - resetting all rooms.")
+            log.info("Firefly has been enabled - resetting all rooms.")
             for room in pyscript.app_config["rooms"]:
                 reset_heating(room)
