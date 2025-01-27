@@ -107,7 +107,7 @@ def trigger_factory(room):
         "sunday": [],
     }
 
-    for day in [day for day in pyscript.app_config["rooms"][room]]:
+    for day in pyscript.app_config["rooms"][room]:
         if day == "default":
             for weekday in [weekday for weekday in weekdays if not weekdays[weekday]]:
                 weekdays[weekday] = create_triggers(room, day, weekday)
@@ -123,7 +123,7 @@ def trigger_factory(room):
 def create_triggers(room, day, weekday):
     time_triggers = []
 
-    for time in [time for time in pyscript.app_config["rooms"][room][day]]:
+    for time in pyscript.app_config["rooms"][room][day]:
         log.debug(f"Firefly is creating a trigger in {room} for {weekday} at {time}") 
 
         @time_trigger(get_cron(weekday, time))
@@ -159,7 +159,8 @@ def firefly_update_heating(room):
 @service
 def firefly_update_all_heating():
     log.info(f"Firefly is setting mode to '{"home" if is_home() else "away"}'.")
-    [firefly_update_heating(room) for room in pyscript.app_config["rooms"]]
+    for room in pyscript.app_config["rooms"]:
+        firefly_update_heating(room)
 
 
 @state_trigger(f"{pyscript.app_config['zone']} or {pyscript.app_config['enabler']} or {pyscript.app_config['preheat']}")
