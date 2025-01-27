@@ -151,8 +151,8 @@ def firefly_update_heating(room):
         service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=target)
         service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="home")
     else:
-        log.info(f"Firefly is updating the heating in {room} from {current} to 13 (currently set to away).")
-        service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=13)
+        log.info(f"Firefly is updating the heating in {room} from {current} to {pyscript.app_config["away_temperature"]} (currently set to away).")
+        service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=pyscript.app_config["away_temperature"])
         service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="away")
 
 
