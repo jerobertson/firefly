@@ -6,7 +6,7 @@ TRIGGERS = {}
 def firefly():
     log.info("Firefly is starting up...")
     
-    for room in [room for room in pyscript.app_config["rooms"]]:
+    for room in pyscript.app_config["rooms"]:
         get_temp_target(room)
 
         room_triggers = trigger_factory(room)
