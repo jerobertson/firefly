@@ -15,92 +15,6 @@ def firefly():
     log.info("Firefly is ready!")
 
 
-def weekday_to_dow(weekday):
-    if weekday == "monday":
-        return 1
-    elif weekday == "tuesday":
-        return 2
-    elif weekday == "wednesday":
-        return 3
-    elif weekday == "thursday":
-        return 4
-    elif weekday == "friday":
-        return 5
-    elif weekday == "saturday":
-        return 6
-
-    return 0
-
-
-def dow_to_weekday(dow):
-    return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][dow]
-
-
-def get_cron(weekday, time):
-    h, m = time.split(":")
-    dow = weekday_to_dow(weekday)
-
-    return f"cron({m} {h} * * {dow})"
-
-
-def get_timestamp(h, m):
-    return int(h) * 60 + int(m)
-
-
-def get_time():
-    now = datetime.datetime.now().time()
-    dow = datetime.datetime.today().isoweekday() % 7
-    
-    h, m, q = str(now).split(":", 3)
-    timestamp = get_timestamp(h, m)
-
-    return dow, timestamp
-
-
-def get_current_schedule(room, weekday, current_timestamp):
-    current_schedule = 0
-
-    for time in pyscript.app_config["rooms"][room][weekday]:
-        h, m = time.split(":")
-        if get_timestamp(h, m) <= current_timestamp:
-            current_schedule = time
-
-    return current_schedule
-
-
-def get_temp_target(room):
-    dow, timestamp = get_time()
-    weekday = dow_to_weekday(dow)
-
-    if weekday not in pyscript.app_config["rooms"][room] and weekday in ["saturday", "sunday"] and "weekend" in pyscript.app_config["rooms"][room]:
-        weekday = "weekend"
-    elif weekday not in pyscript.app_config["rooms"][room]:
-        weekday = "default"
-
-    enabled = pyscript.app_config["enabler"] == "on"
-    preset_mode = get_preset_mode()
-    
-    current_schedule = get_current_schedule(room, weekday, timestamp)
-    target = pyscript.app_config["rooms"][room][weekday][current_schedule] if preset_mode == "home" else pyscript.app_config["away_temperature"]
-
-    try:
-        scheduled = target
-        actual = state.getattr(f"climate.{room}")["temperature"]
-        matching = "on" if scheduled == actual else "off"
-        state.set(f"firefly.{room}", matching, {"actual_target": actual, "scheduled_target": scheduled, "mode": preset_mode})
-    except:
-        pass
-
-    return target
-
-
-def get_preset_mode():
-    zone = int(state.get(pyscript.app_config["zone"])) > 0 
-    preheat = state.get(pyscript.app_config["preheat"]) == "on"
-    enabled = state.get(pyscript.app_config["enabler"]) == "on"
-    return "home" if enabled and (zone or preheat) else "away"
-
-
 def trigger_factory(room):
     weekdays = {
         "monday": [],
@@ -138,6 +52,96 @@ def create_triggers(room, day, weekday):
         time_triggers.append(heat_change)
 
     return time_triggers
+
+
+@pyscript_compile
+def weekday_to_dow(weekday):
+    if weekday == "monday":
+        return 1
+    elif weekday == "tuesday":
+        return 2
+    elif weekday == "wednesday":
+        return 3
+    elif weekday == "thursday":
+        return 4
+    elif weekday == "friday":
+        return 5
+    elif weekday == "saturday":
+        return 6
+
+    return 0
+
+
+@pyscript_compile
+def dow_to_weekday(dow):
+    return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][dow]
+
+
+@pyscript_compile
+def get_cron(weekday, time):
+    h, m = time.split(":")
+    dow = weekday_to_dow(weekday)
+
+    return f"cron({m} {h} * * {dow})"
+
+
+@pyscript_compile
+def get_timestamp(h, m):
+    return int(h) * 60 + int(m)
+
+
+@pyscript_compile
+def get_time():
+    now = datetime.datetime.now().time()
+    dow = datetime.datetime.today().isoweekday() % 7
+    
+    h, m, q = str(now).split(":", 3)
+    timestamp = get_timestamp(h, m)
+
+    return dow, timestamp
+
+
+def get_current_schedule(room, weekday, current_timestamp):
+    current_schedule = 0
+
+    for time in pyscript.app_config["rooms"][room][weekday]:
+        h, m = time.split(":")
+        if get_timestamp(h, m) <= current_timestamp:
+            current_schedule = time
+
+    return current_schedule
+
+
+def get_temp_target(room):
+    dow, timestamp = get_time()
+    weekday = dow_to_weekday(dow)
+
+    if weekday not in pyscript.app_config["rooms"][room] and weekday in ["saturday", "sunday"] and "weekend" in pyscript.app_config["rooms"][room]:
+        weekday = "weekend"
+    elif weekday not in pyscript.app_config["rooms"][room]:
+        weekday = "default"
+
+    enabled = pyscript.app_config["enabler"] == "on"
+    preset_mode = get_preset_mode()
+    
+    current_schedule = get_current_schedule(room, weekday, timestamp)
+    target = pyscript.app_config["rooms"][room][weekday][current_schedule] if preset_mode == "home" else pyscript.app_config["away_temperature"]
+
+    try:
+        actual = state.getattr(f"climate.{room}")["temperature"]
+        matching = "on" if target == actual else "off"
+        state.set(f"firefly.{room}", matching, {"actual_target": actual, "scheduled_target": target, "mode": preset_mode})
+    except:
+        pass
+
+    return target
+
+
+def get_preset_mode():
+    zone = int(state.get(pyscript.app_config["zone"])) > 0 
+    preheat = state.get(pyscript.app_config["preheat"]) == "on"
+    enabled = state.get(pyscript.app_config["enabler"]) == "on"
+    return "home" if enabled and (zone or preheat) else "away"
 
 
 @service
