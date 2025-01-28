@@ -162,9 +162,20 @@ def firefly_update_heating(room):
 
 @service
 def firefly_update_all_heating():
-    log.info(f"Firefly is setting mode to '{get_preset_mode()}'.")
     for room in pyscript.app_config["rooms"]:
         firefly_update_heating(room)
+
+
+@service
+def firefly_toggle():
+    zone = int(state.get(pyscript.app_config['zone'])) > 0
+    enable = state.get(pyscript.app_config['enabler']) == 'on'
+    preheat = state.get(pyscript.app_config['preheat']) == 'on'
+
+    if not zone and not enable:
+        service.call("input_boolean", "turn_on", entity_id=pyscript.app_config["preheat"])
+    else:
+        service.call("input_boolean", "toggle", entity_id=pyscript.app_config["enabler"])
 
 
 @state_trigger(f"{pyscript.app_config['zone']} or {pyscript.app_config['enabler']} or {pyscript.app_config['preheat']}")
