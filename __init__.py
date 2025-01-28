@@ -76,24 +76,29 @@ def get_temp_target(room):
         weekday = "weekend"
     elif weekday not in pyscript.app_config["rooms"][room]:
         weekday = "default"
+
+    enabled = pyscript.app_config["enabler"] == "on"
+    preset_mode = get_preset_mode()
     
     current_schedule = get_current_schedule(room, weekday, timestamp)
-    target = pyscript.app_config["rooms"][room][weekday][current_schedule]
+    target = pyscript.app_config["rooms"][room][weekday][current_schedule] if preset_mode == "home" else pyscript.app_config["away_temperature"]
 
     try:
         scheduled = target
         actual = state.getattr(f"climate.{room}")["temperature"]
-        home = is_home()
-        matching = "on" if scheduled == actual or not home else "off"
-        state.set(f"firefly.{room}", matching, {"actual_target": actual, "scheduled_target": scheduled, "mode": "home" if home else "away"})
+        matching = "on" if scheduled == actual else "off"
+        state.set(f"firefly.{room}", matching, {"actual_target": actual, "scheduled_target": scheduled, "mode": preset_mode})
     except:
         pass
 
     return target
 
 
-def is_home():
-    return int(state.get(pyscript.app_config["zone"])) > 0 or state.get(pyscript.app_config["preheat"]) == "on"
+def get_preset_mode():
+    zone = int(state.get(pyscript.app_config["zone"])) > 0 
+    preheat = state.get(pyscript.app_config["preheat"]) == "on"
+    enabled = state.get(pyscript.app_config["enabler"]) == "on"
+    return "home" if enabled and (zone or preheat) else "away"
 
 
 def trigger_factory(room):
@@ -139,26 +144,21 @@ def create_triggers(room, day, weekday):
 def firefly_update_heating(room):
     current = state.getattr(f"climate.{room}")["temperature"]
     target = get_temp_target(room)
-    home = is_home()
+    preset = get_preset_mode()
 
     if current == target:
         log.info(f"Firefly will keep the temperature in {room} at {current}.")
-        preset = "home" if home else "away"
-        if state.getattr(f"climate.{room}")["preset_mode"] != preset:
-            service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode=preset)
-    elif home:
+    else:
         log.info(f"Firefly is updating the heating in {room} from {current} to {target}.")
         service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=target)
-        service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="home")
-    else:
-        log.info(f"Firefly is updating the heating in {room} from {current} to {pyscript.app_config["away_temperature"]} (currently set to away).")
-        service.call("climate", "set_temperature", entity_id=f"climate.{room}", temperature=pyscript.app_config["away_temperature"])
-        service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode="away")
+
+    if state.getattr(f"climate.{room}")["preset_mode"] != preset:
+        service.call("climate", "set_preset_mode", entity_id=f"climate.{room}", preset_mode=preset)
 
 
 @service
 def firefly_update_all_heating():
-    log.info(f"Firefly is setting mode to '{"home" if is_home() else "away"}'.")
+    log.info(f"Firefly is setting mode to '{get_preset_mode()}'.")
     for room in pyscript.app_config["rooms"]:
         firefly_update_heating(room)
 
@@ -175,7 +175,7 @@ def state_handler(trigger_type=None, var_name=None, value=None, old_value=None):
     if zone and enable and preheat:
         log.info("Firefly is turning pre-heat off.")
         service.call("input_boolean", "turn_off", entity_id=pyscript.app_config["preheat"])
-    elif (zone and not enable and preheat) or (not zone and not enable and preheat):
+    elif not enable and preheat:
         log.info("Firefly is turning enable on.")
         service.call("input_boolean", "turn_on", entity_id=pyscript.app_config["enabler"])
     else:
